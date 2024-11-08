@@ -1,0 +1,169 @@
+#!/usr/bin/env python
+
+# A sample training component that trains a simple scikit-learn decision tree model.
+# This implementation works in File mode and makes no assumptions about the input file names.
+# Input is specified as CSV with a data point in each row and the labels in the first column.
+
+from __future__ import print_function
+
+import json
+import os
+import pickle
+import sys
+import traceback
+
+import pandas as pd
+from sklearn import tree
+from sklearn.model_selection import train_test_split
+
+
+import pandas as pd
+import boto3
+import re 
+import os
+import pandas as pd
+import spacy
+from spacy.tokens import DocBin
+import random
+import pandas as pd
+import string
+import  json
+from tqdm import tqdm 
+from sklearn.model_selection import train_test_split
+
+nlp = spacy.blank("en") # load a new spacy model
+
+# These are the paths to where SageMaker mounts interesting things in your container.
+
+prefix = '/opt/ml/'
+
+input_path = prefix + 'input/data'
+output_path = os.path.join(prefix, 'output')
+model_path = os.path.join(prefix, 'model')
+param_path = os.path.join(prefix, 'input/config/hyperparameters.json')
+
+# This algorithm has a single channel of input data called 'training'. Since we run in
+# File mode, the input files are copied to the directory specified here.
+channel_name='training'
+training_path = os.path.join(input_path, channel_name)
+
+def get_start_end_re(data,word):
+    if re.search(r'\b'+re.escape(word)+r'\b', data):
+        return data.find(word),data.find(word)+len(word)-1
+    else:
+        return False
+    
+    
+def createDateSpacyFormat(text_data,label,entityName):
+    spacyFormat = []
+    for count in tqdm(range(len(text_data))):
+        tupList = []
+        entDict = {}
+#         tupList.append(text_data[count])
+        if get_start_end_re(text_data[count],label[count]) == False:
+            continue
+        else:
+            start_index, end_index = get_start_end_re(text_data[count],label[count])
+            temp_list = list(('start_index', 'end_index', 'Word'))
+            temp_list[0] = start_index
+            temp_list[1] = end_index
+            temp_list[2] = entityName
+            entList = []
+            entList.append(tuple(temp_list))
+            entDict['entities'] = entList
+            tupList.append(text_data[count])
+            tupList.append(entDict)
+            spacyFormat.append(tuple(tupList))
+    return spacyFormat
+def create_training(TRAIN_DATA):
+    
+    db = DocBin() # create a DocBin object
+
+    for text, annot in tqdm(TRAIN_DATA): # data in previous format
+        doc = nlp.make_doc(text) # create doc object from text
+        ents = []
+#         print(text)
+#         print(annot[])
+        for start, end, label in annot["entities"]: # add character indexes
+            span = doc.char_span(start, end, label=label, alignment_mode="expand")
+            print("*********** Starting*****************")
+            print(span)
+            print(start)
+            print(end)
+            print(label)
+            print("*********** Ending*****************")
+            if span is None:
+                print("Skipping entity")
+            else:
+                ents.append(span)
+        doc.ents = ents # label the text with the ents
+        db.add(doc)
+    return (db)
+
+
+# The function to execute the training.
+def train():
+    print('Starting the training.')
+    try:
+        # Read in any hyperparameters that the user passed with the training job
+        with open(param_path, 'r') as tc:
+            trainingParams = json.load(tc)
+            
+            
+        print("trainning Parameeter:------",trainingParams)
+
+        # Take the set of files and read them all into a single pandas dataframe
+        input_files = [ os.path.join(training_path, file) for file in os.listdir(training_path) ]
+        if len(input_files) == 0:
+            raise ValueError(('There are no files in {}.\n' +
+                              'This usually indicates that the channel ({}) was incorrectly specified,\n' +
+                              'the data specification in S3 was incorrectly specified or the role specified\n' +
+                              'does not have permission to access the data.').format(training_path, channel_name))
+        dataframe = [ pd.read_excel(file) for file in input_files if file.endswith(".xlsx")][0]
+        
+        data1 = list(dataframe['PageText'])
+        data2 = list(dataframe['compDate'])
+        X_train, X_test, y_train, y_test = train_test_split(data1,data2,test_size=0.2)
+
+        X_train, X_test, y_train, y_test = train_test_split(data1,data2,test_size=0.2)
+        spacyformat = createDateSpacyFormat(X_train,y_train,"IncepDate")
+        X_tr, X_te= train_test_split(spacyformat,test_size=0.2)
+
+        new_training_data = create_training(X_tr[:100])
+        new_training_data.to_disk("train.spacy")
+
+        new_testing_data = create_training(X_te[:50])
+        new_testing_data.to_disk("dev.spacy")
+
+
+        os.system('! python -m spacy init fill-config base_config.cfg config.cfg')
+        os.system('python -m spacy train config.cfg --output ./output --paths.train ./train.spacy --paths.dev ./dev.spacy')
+        
+        nlp = spacy.load('output/model-best')
+
+        
+        
+        # save the model
+        with open(os.path.join(model_path, 'spacy_ner.pkl'), 'wb') as out:
+            pickle.dump(nlp, out)
+        print('Training complete.')
+    except Exception as e:
+        # Write out an error file. This will be returned as the failureReason in the
+        # DescribeTrainingJob result.
+        trc = traceback.format_exc()
+        with open(os.path.join(output_path, 'failure'), 'w') as s:
+            s.write('Exception during training: ' + str(e) + '\n' + trc)
+        # Printing this causes the exception to be in the training job logs, as well.
+        print('Exception during training: ' + str(e) + '\n' + trc, file=sys.stderr)
+        # A non-zero exit code causes the training job to be marked as Failed.
+        sys.exit(255)
+        
+        
+        
+if __name__ == '__main__':
+    train()
+
+    # A zero exit code causes the job to be marked a Succeeded.
+    sys.exit(0)
+
+

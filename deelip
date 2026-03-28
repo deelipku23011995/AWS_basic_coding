@@ -63,3 +63,14 @@ def answer_question(question: str, history):
 
 
 answer_question("Who is Averi Lancaster?", [])
+
+
+
+from langchain.embeddings.base import Embeddings
+
+class CustomEmbeddings(Embeddings):
+    def embed_documents(self, texts):
+        return [my_embedding_fn(text) for text in texts]
+
+    def embed_query(self, text):
+        return my_embedding_fn(text)

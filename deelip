@@ -1,132 +1,65 @@
+import os
+import glob
+import tiktoken
+import numpy as np
+from dotenv import load_dotenv
+from langchain_openai import OpenAIEmbeddings
+from langchain_chroma import Chroma
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.document_loaders import DirectoryLoader, TextLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from langchain.vectorstores import FAISS
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.document_loaders import PyPDFLoader, DirectoryLoader
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.text_splitter import CharacterTextSplitter
-from langchain.chains import RetrievalQA
-
-
-pdf_path = "/content/drive/MyDrive/pdffolder/deelip_resume.pdf"
-
-loader = PyPDFLoader(pdf_path)
-document = loader.load()
-
-text_splitter = CharacterTextSplitter(chunk_size=100,chunk_overlap=50)
-texts = text_splitter.split_documents(document)
-
-embeddings = HuggingFaceEmbeddings(model_name='sentence-transformers/all-MiniLM-L6-v2',model_kwargs={'device': 'cpu'})
-
-vectorstore = FAISS.from_documents(texts, embeddings)
-
-llm = HuggingFacePipeline(pipeline = pipe, model_kwargs = {'temperature':0})
-
-qa= RetrievalQA.from_chain_type(llm = llm , chain_type = "stuff" , retriever = vectorstore.as_retriever())
+from langchain_chroma import Chroma
+from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_huggingface import HuggingFaceEmbeddings
 
 
+db_name = "vector_db"
 
-from langchain import HuggingFacePipeline
-llm = HuggingFacePipeline(pipeline = pipe, model_kwargs = {'temperature':0})
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+chunks = text_splitter.split_documents(documents)
 
-from langchain.prompts import PromptTemplate
-prompt_template = get_prompt(instruction, sys_prompt)
+print(f"Divided into {len(chunks)} chunks")
+print(f"First chunk:\n\n{chunks[0]}")
 
-llama_prompt = PromptTemplate(
-    template=prompt_template, input_variables=["context", "question"]
-)
 
-chain_type_kwargs = {"prompt": llama_prompt}
+# Pick an embedding model
+
+embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+#embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
+
+if os.path.exists(db_name):
+    Chroma(persist_directory=db_name, embedding_function=embeddings).delete_collection()
+
+vectorstore = Chroma.from_documents(documents=chunks, embedding=embeddings, persist_directory=db_name)
+print(f"Vectorstore created with {vectorstore._collection.count()} documents")
+
+
+embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+vectorstore = Chroma(persist_directory=DB_NAME, embedding_function=embeddings)
 
 
 retriever = vectorstore.as_retriever()
-from langchain.schema import prompt
-# create the chain to answer questions
-qa_chain = RetrievalQA.from_chain_type(llm=llm,
-                                       chain_type="stuff",
-                                       retriever=retriever,
-                                       chain_type_kwargs=chain_type_kwargs,
-                                       return_source_documents=True,
-                                       verbose = True)
+llm = ChatOpenAI(temperature=0, model_name=MODEL)
+
+
+SYSTEM_PROMPT_TEMPLATE = """
+You are a knowledgeable, friendly assistant representing the company Insurellm.
+You are chatting with a user about Insurellm.
+If relevant, use the given context to answer any question.
+If you don't know the answer, say so.
+Context:
+{context}
+"""
+
+
+def answer_question(question: str, history):
+    docs = retriever.invoke(question)
+    context = "\n\n".join(doc.page_content for doc in docs)
+    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(context=context)
+    response = llm.invoke([SystemMessage(content=system_prompt), HumanMessage(content=question)])
+    return response.content
 
 
 
-
-# full example
-query = "What is Invoice Numer?"
-llm_response = qa_chain(query)
-process_llm_response(llm_response)
-
-
-
-import json
-import textwrap
-
-B_INST, E_INST = "[INST]", "[/INST]"
-B_SYS, E_SYS = "<<SYS>>\n", "\n<</SYS>>\n\n"
-DEFAULT_SYSTEM_PROMPT = """\
-You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe. Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.
-
-If a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information."""
-
-
-
-def get_prompt(instruction, new_system_prompt=DEFAULT_SYSTEM_PROMPT ):
-    SYSTEM_PROMPT = B_SYS + new_system_prompt + E_SYS
-    prompt_template =  B_INST + SYSTEM_PROMPT + instruction + E_INST
-    return prompt_template
-
-def cut_off_text(text, prompt):
-    cutoff_phrase = prompt
-    index = text.find(cutoff_phrase)
-    if index != -1:
-        return text[:index]
-    else:
-        return text
-
-def remove_substring(string, substring):
-    return string.replace(substring, "")
-
-
-
-def generate(text):
-    prompt = get_prompt(text)
-    with torch.autocast('cuda', dtype=torch.bfloat16):
-        inputs = tokenizer(prompt, return_tensors="pt").to('cuda')
-        outputs = model.generate(**inputs,
-                                 max_new_tokens=512,
-                                 eos_token_id=tokenizer.eos_token_id,
-                                 pad_token_id=tokenizer.eos_token_id,
-                                 )
-        final_outputs = tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
-        final_outputs = cut_off_text(final_outputs, '</s>')
-        final_outputs = remove_substring(final_outputs, prompt)
-
-    return final_outputs#, outputs
-
-def parse_text(text):
-        wrapped_text = textwrap.fill(text, width=100)
-        print(wrapped_text +'\n\n')
-        # return assistant_text
-
-
-
-system_prompt = "You are an advanced assistant that Extract the text from document"
-instruction = "respond with only one and no additional text :{text}"
-
-
-template = get_prompt(instruction, system_prompt)
-print("Template:----", template)
-
-prompt = PromptTemplate(template=template, input_variables=["text"])
-
-qa_chain_new = RetrievalQA.from_chain_type(llm=llm,
-                                       chain_type="stuff",
-                                       retriever=retriever,
-                                       chain_type_kwargs=chain_type_kwargs,
-                                       return_source_documents=True,
-                                       verbose = True)
-
-
-
-res = qa_chain_new("total due?")
-print(res)
+answer_question("Who is Averi Lancaster?", [])

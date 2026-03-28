@@ -74,3 +74,13 @@ class CustomEmbeddings(Embeddings):
 
     def embed_query(self, text):
         return my_embedding_fn(text)
+
+
+results = vectorstore.similarity_search_with_score(
+    query="your query here",
+    k=3
+)
+
+for doc, score in results:
+    print("Text:", doc.page_content)
+    print("Score:", score)

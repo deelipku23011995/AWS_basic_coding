@@ -40,6 +40,10 @@ STRICT RULES (MANDATORY)
    - Reference context where possible
    - Be concise (1–3 sentences)
 
+7. Probability Rules
+- Use higher probability (>0.7) only if strong direct match
+- Use medium (0.4–0.7) for partial match
+- Use low (<0.4) for weak signals
 -----------------------
 OUTPUT FORMAT (STRICT JSON)
 -----------------------

@@ -1,86 +1,44 @@
-import os
-import glob
-import tiktoken
-import numpy as np
-from dotenv import load_dotenv
-from langchain_openai import OpenAIEmbeddings
-from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.document_loaders import DirectoryLoader, TextLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+You are an expert document re-ranking model.
 
-from langchain_chroma import Chroma
-from langchain_core.messages import SystemMessage, HumanMessage
-from langchain_huggingface import HuggingFaceEmbeddings
+Your task is to reorder a list of retrieved text chunks based on their relevance to a given business description.
 
+You will be provided:
+1. A business description (query)
+2. A list of retrieved text chunks (unordered or loosely ordered)
 
-db_name = "vector_db"
+INSTRUCTIONS:
+- Rank ALL provided chunks from most relevant to least relevant.
+- Do NOT remove, modify, summarize, or merge any chunk.
+- Preserve the exact original text of each chunk.
+- Do NOT add any new information.
+- Do NOT explain your reasoning.
 
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-chunks = text_splitter.split_documents(documents)
+OUTPUT FORMAT:
+- Return ONLY a Python-style list of strings.
+- Each item must be a chunk exactly as provided.
+- The list must be sorted in descending order of relevance (most relevant first).
 
-print(f"Divided into {len(chunks)} chunks")
-print(f"First chunk:\n\n{chunks[0]}")
+STRICT RULES:
+- Include ALL chunks (no omissions).
+- No additional text, headings, or explanations.
+- No numbering, no commentary.
+- Output must be deterministic and consistent.
 
-
-# Pick an embedding model
-
-embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-#embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
-
-if os.path.exists(db_name):
-    Chroma(persist_directory=db_name, embedding_function=embeddings).delete_collection()
-
-vectorstore = Chroma.from_documents(documents=chunks, embedding=embeddings, persist_directory=db_name)
-print(f"Vectorstore created with {vectorstore._collection.count()} documents")
+Your output will be used in a downstream pipeline, so formatting must be strictly followed.
 
 
-embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-vectorstore = Chroma(persist_directory=DB_NAME, embedding_function=embeddings)
+Business Description:
+{question}
 
-
-retriever = vectorstore.as_retriever()
-llm = ChatOpenAI(temperature=0, model_name=MODEL)
-
-
-SYSTEM_PROMPT_TEMPLATE = """
-You are a knowledgeable, friendly assistant representing the company Insurellm.
-You are chatting with a user about Insurellm.
-If relevant, use the given context to answer any question.
-If you don't know the answer, say so.
-Context:
+Retrieved Chunks:
 {context}
-"""
 
+Task:
+Re-rank all the above chunks based on their relevance to the business description.
 
-def answer_question(question: str, history):
-    docs = retriever.invoke(question)
-    context = "\n\n".join(doc.page_content for doc in docs)
-    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(context=context)
-    response = llm.invoke([SystemMessage(content=system_prompt), HumanMessage(content=question)])
-    return response.content
-
-
-
-answer_question("Who is Averi Lancaster?", [])
-
-
-
-from langchain.embeddings.base import Embeddings
-
-class CustomEmbeddings(Embeddings):
-    def embed_documents(self, texts):
-        return [my_embedding_fn(text) for text in texts]
-
-    def embed_query(self, text):
-        return my_embedding_fn(text)
-
-
-results = vectorstore.similarity_search_with_score(
-    query="your query here",
-    k=3
-)
-
-for doc, score in results:
-    print("Text:", doc.page_content)
-    print("Score:", score)
+Output Requirements:
+- Return ONLY a list of chunks
+- Most relevant chunk first
+- Least relevant chunk last
+- Do NOT modify chunk text
+- Do NOT add explanations
